@@ -1,17 +1,33 @@
 openapi: 3.0.0
 info:
-  title: 示例 API
-  description: 这是一个基本的 Swagger API 文档示例
+  title: 接口文档
+  description: 这是一个基本的接口文档
   version: 1.0.0
 servers:
-  - url: http://api.example.com/v1
-    description: 生产环境服务器
-  - url: http://dev.api.example.com/v1
-    description: 开发环境服务器
+  - url: http://localhost:8080/api
+    description: 本地开发环境服务器
+  - url: http://localhost:8180/api
+    description: 线上开发环境服务器
+security:
+  - BearerAuth: []  # 空数组表示无需指定额外权限范围
+
+tags:
+  - name: 认证相关
+    description: 用户登录、退出、Token 刷新等接口
+  - name: 用户管理
+    description: 用户信息查询、修改、权限管理等接口
+  - name: 商品管理
+    description: 商品列表、详情、库存操作等接口
+  - name: 订单管理
+    description: 订单创建、支付、查询等接口
 
 paths:
-  /users:
+  /v1/management/users:
     get:
+      tags:
+        - 用户管理
+      security:
+        - BearerAuth: ['USER_MANAGEMENT']
       summary: 获取所有用户
       description: 返回系统中所有用户的列表
       parameters:
@@ -29,22 +45,50 @@ paths:
           schema:
             type: integer
             default: 10
+        - name: user_type
+          in: query
+          description: 用户类型
+          required: false
+          schema:
+            type: string
+            example: PRIVATE
+            enum:
+              - PRIVATE
+              - COMPANY
+        - name: username
+          in: query
+          description: 用户名
+          required: false
+          schema:
+            type: string
+            example: Alice
       responses:
         '200':
           description: 成功返回用户列表
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  total:
-                    type: integer
-                    description: 总用户数
-                  users:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/User'
+                $ref: '#/components/schemas/QueryUserPagedResponse'
+        '400':
+          description: 无效的请求数据
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BadRequest'
+              examples:
+                usertypeUnacceptable:
+                  value:
+                    errorCode: USERTYPE_UNACCEPTABLE
+                    message: 用户
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /v1/users:
     post:
+      tags:
+        - 用户管理
       summary: 创建新用户
       description: 在系统中创建一个新用户
       requestBody:
@@ -52,19 +96,33 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UserInput'
+              $ref: '#/components/schemas/CreateUserRequest'
       responses:
         '201':
           description: 用户创建成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/User'
+                $ref: '#/components/schemas/UserDto'
         '400':
           description: 无效的请求数据
-
-  /users/{id}:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BadRequest'
+              examples:
+                usernameMissing:
+                  value:
+                    errorCode: USERNAME_MISSING
+                    message: 用户名未提供
+                usernameUnacceptable:
+                  value:
+                    errorCode: USERNAME_UNACCEPTABLE
+                    message: 用户名校验不通过
+  /v1/users/{id}:
     get:
+      tags:
+        - 用户管理
       summary: 获取指定用户
       description: 根据ID返回单个用户信息
       parameters:
@@ -75,54 +133,218 @@ paths:
           schema:
             type: string
             format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUserRequest'
       responses:
         '200':
           description: 成功返回用户信息
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/User'
+                $ref: '#/components/schemas/UserDto'
+        '404':
+          description: 用户不存在
+    patch:
+      tags:
+        - 用户管理
+      summary: 修改用户信息
+      description: 根据ID修改单个用户信息
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: 用户ID
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserRequest'
+      responses:
+        '200':
+          description: 成功返回用户信息
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserDto'
         '404':
           description: 用户不存在
 
 components:
+  securitySchemes:
+    BearerAuth:
+      type: http  # 类型为 HTTP 认证
+      scheme: bearer  # 认证方案为 Bearer
+      bearerFormat: JWT  # 明确 Token 格式为 JWT（可选，但建议加）
+      description: "请在请求头中携带 Token：`Authorization: Bearer {你的JWT令牌}`"
+
+
+  responses:
+    Unauthorized:
+      description: 未授权访问
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - errorCode
+              - message
+            properties:
+              errorCode:
+                type: string
+                description: 错误码
+                example: UNAUTHORIZED
+              message:
+                type: string
+                description: 错误内容
+                example: 未认证
+    Forbidden:
+      description: 不允许访问
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - errorCode
+              - message
+            properties:
+              errorCode:
+                type: string
+                description: 错误码
+                example: FORBIDDEN
+              message:
+                type: string
+                description: 错误内容
+                example: 不允许访问
+
+
   schemas:
-    UserInput:
+    BadRequest:
       type: object
       required:
-        - name
-        - email
+        - errorCode
+        - message
       properties:
-        name:
+        errorCode:
+          type: string
+          description: 错误码
+          example: BAD_REQUEST
+        message:
+          type: string
+          description: 错误内容
+          example: 请求失败
+        detail:
+          type: object
+          description: 错误详细内容
+
+    PaginationInfo:
+      description: 通用分页返回中分页信息
+      type: object
+      required:
+        - totalAmount
+        - totalPage
+        - pageNumber
+        - pageLimit
+      properties:
+        totalAmount:
+          type: integer
+          description: 总数据量
+          example: 100
+        totalPage:
+          type: integer
+          description: 总页数
+          example: 10
+        pageNumber:
+          type: integer
+          description: 页码
+          example: 1
+        pageLimit:
+          type: integer
+          description: 每页数量
+          example: 10
+
+# 用户管理相关DTO
+    CreateUserRequest:
+      description: 用户创建请求体
+      type: object
+      required:
+        - username
+        - nickname
+        - password
+      properties:
+        username:
           type: string
           description: 用户名
-        email:
+          example: AliceExample
+        nickname:
           type: string
-          format: email
-          description: 用户邮箱
-        age:
-          type: integer
-          minimum: 0
-          description: 用户年龄（可选）
+          description: 用户昵称
+          example: Alice
+        password:
+          type: string
+          description: 登录密码
 
-    User:
+    UpdateUserRequest:
+      description: 用户修改请求体
       type: object
+      required:
+        - nickname
+      properties:
+        nickname:
+          type: string
+          description: 用户昵称
+          example: Alice
+
+    UserDto:
+      description: 用户简单信息
+      type: object
+      required:
+        - id
+        - username
+        - nickname
+        - userType
       properties:
         id:
-          type: string
-          format: uuid
-          description: 用户唯一标识
-        name:
+          type: integer
+          description: 用户ID
+          example: 1
+        username:
           type: string
           description: 用户名
-        email:
+          example: AliceExample
+        nickname:
           type: string
-          format: email
-          description: 用户邮箱
-        age:
-          type: integer
-          description: 用户年龄
-        createdAt:
+          description: 用户昵称
+          example: Alice
+        phoneNumber:
           type: string
-          format: date-time
-          description: 创建时间
+          description: 手机号码
+          example: 13012341234
+        userType:
+          type: string
+          description: 用户类型
+          example: PRIVATE
+          enum:
+            - PRIVATE
+            - COMPANY
+
+    QueryUserPagedResponse:
+      description: 用户分页查询返回体
+      type: object
+      required:
+        - pageInfo
+        - content
+      properties:
+        pageInfo:
+          $ref: '#/components/schemas/PaginationInfo'
+        content:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserDto'
+
